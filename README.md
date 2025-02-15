@@ -4,6 +4,8 @@ exciton absorption spectra for H2OBPC thin films
 Description: 
 
 1. Methods folder has necessary python scripts
+
+   
 2. Systems folder has QChem output files for H2OBPC molecule for functionals wPBE, PBE, PBE0
 
 Usage: 
