@@ -48,9 +48,10 @@ which are used to compute oscillator strengths and absorption spectra.
 ## USAGE:
 
 ### Command-line execution:
+
 python3 tb_ham.py <molecule_name> <functional> <systems> [OPTIONS]
 
-#@author: Sengupta, cc-@Shao Group
+#@author: Sanghita Sengupta, cc-@Shao Group
 """
 
 
@@ -65,6 +66,7 @@ from matplotlib import colors
 from mpl_toolkits.mplot3d import Axes3D
 from scipy.special import wofz
 from scipy.integrate import simpson
+import traceback
 
 
 # helper function definitions using parsed Q-chem data 
@@ -207,6 +209,13 @@ def extract_molecule_data(center_molecule, json_files: list, r_cutoffs=[8,10], z
     atoms, coordinates = extract_geometry(data, geometry_key=f'geometry {center_molecule[1]}')
     center_of_mass = calculate_center_of_mass(atoms, coordinates)
     z_center = center_of_mass[2]
+
+    # cache the json data to reduce file io operations
+    json_cache = {}
+    for json_index, json_file in enumerate(json_files):
+        with open(json_file, 'r') as file:
+            json_cache[json_index] = json.load(file)
+
     
     #initialize data storage
     com_done = [] # center-of-mass
@@ -214,8 +223,9 @@ def extract_molecule_data(center_molecule, json_files: list, r_cutoffs=[8,10], z
     
     # loop through output JSON files
     for json_index, json_file in enumerate(json_files):
-        with open(json_file, 'r') as file:
-            data = json.load(file)
+        #with open(json_file, 'r') as file:
+        #    data = json.load(file)
+        data = json_cache[json_index]
 
         # Loop through multiple geometries for the current dimer # geometry 1 and geometry 2
         for geometry_index in range(1, 3):
@@ -258,8 +268,10 @@ def extract_molecule_data(center_molecule, json_files: list, r_cutoffs=[8,10], z
                     neighbor_com_done = [] 
                     # loop over json files and create neighbor data
                     for neighbor_json_index, neighbor_json_file in enumerate(json_files):
-                        with open(neighbor_json_file, 'r') as file:
-                            neighbor_data = json.load(file)
+                        #with open(neighbor_json_file, 'r') as file:
+                        #    neighbor_data = json.load(file)
+                        neighbor_data = json_cache[neighbor_json_index]
+
                         # loop over two possible geometries but avoids comparing with itself
                         for neighbor_geometry_index in range(1, 3):
                             if neighbor_json_index == json_index and neighbor_geometry_index == geometry_index:
@@ -281,6 +293,7 @@ def extract_molecule_data(center_molecule, json_files: list, r_cutoffs=[8,10], z
                             except Exception as e: # error printing
                                 if "No geometries found" not in str(e):
                                     print('inner:', e)
+                                    traceback.print_exc()
                                 continue
 
                     # sort neighbor list in ascending order of neigbor distance
@@ -296,6 +309,7 @@ def extract_molecule_data(center_molecule, json_files: list, r_cutoffs=[8,10], z
             except Exception as e:
                 if "No geometries found" not in str(e):
                     print('outer', e)
+                    traceback.print_exc()
                 continue
     #print(molecule_data['0,1'][3][3])
     #print(json_files)
@@ -307,7 +321,7 @@ def extract_molecule_data(center_molecule, json_files: list, r_cutoffs=[8,10], z
     return molecule_data, unique_molecules
 
 
-def extract_interaction_terms(json_files: list):
+def extract_interaction_terms(json_files: list, combine='14.014,14.013', caldip=True):
     """
     Extracts interaction terms and excited state properties from a list of molecular dimer JSON files.
     
@@ -362,64 +376,132 @@ def extract_interaction_terms(json_files: list):
             center_of_mass1 = calculate_center_of_mass(atoms1, coordinates1)
             atoms2, coordinates2 = extract_geometry(data, geometry_key=f'geometry 2')
             center_of_mass2 = calculate_center_of_mass(atoms2, coordinates2)
+
             # compute molecule relative c.o.m distance 
-            lengths.append(np.linalg.norm(center_of_mass1-center_of_mass2))
-            length = f'{lengths[-1]:.3f}'
+            distance_vec = center_of_mass1-center_of_mass2
+            distance_label = f'{np.linalg.norm(distance_vec):.3f}'
 
             # Extract excited states
             excited_states = data.get('excited_states', [])
+            interactions = data.get('interactions', [])
 
-            # Extract Coulomb and dipole-dipole interactions
-            Jxx_coul = data['interactions'][0]["Coulomb Interaction (eV)"]
-            Jyx_coul = data['interactions'][1]["Coulomb Interaction (eV)"]
-            Jxy_coul = data['interactions'][2]["Coulomb Interaction (eV)"]
-            Jyy_coul = data['interactions'][3]["Coulomb Interaction (eV)"]
-            Jxx_dipole = data['interactions'][0]["Dipole-Dipole Interaction (eV)"]
-            Jyx_dipole = data['interactions'][1]["Dipole-Dipole Interaction (eV)"]
-            Jxy_dipole = data['interactions'][2]["Dipole-Dipole Interaction (eV)"]
-            Jyy_dipole = data['interactions'][3]["Dipole-Dipole Interaction (eV)"]
-            
-            # excitation energy, transition dipole moments, storing J as 2 X 2 matrix
-            results = {
-                "Qx1": excited_states[0].get("Excitation Energy (eV)", None),
-                "Qy1": excited_states[1].get("Excitation Energy (eV)", None),
-                "Qx2": excited_states[2].get("Excitation Energy (eV)", None),
-                "Qy2": excited_states[3].get("Excitation Energy (eV)", None),
-                "Tx1": excited_states[0].get("Transition Dipole Moment", None),
-                "Ty1": excited_states[1].get("Transition Dipole Moment", None),
-                "Tx2": excited_states[2].get("Transition Dipole Moment", None),
-                "Ty2": excited_states[3].get("Transition Dipole Moment", None),
-                "J_coul": np.array([
-                    [Jxx_coul, Jyx_coul],
-                    [Jxy_coul, Jyy_coul],
-                ]),
-                "J_dipole": np.array([
-                    [Jxx_dipole, Jyx_dipole],
-                    [Jxy_dipole, Jyy_dipole],
-                ])
-            }
-            #print(length, results)
-            interaction_terms[length] = results
+            if 'interactions' in data and len(data['interactions']) >= 1:
+                # Extract Coulomb and dipole-dipole interactions
+                Jxx_coul =   interactions[0]["Coulomb Interaction (eV)"]
+                Jyx_coul =   interactions[1]["Coulomb Interaction (eV)"]
+                Jxy_coul =   interactions[2]["Coulomb Interaction (eV)"]
+                Jyy_coul =   interactions[3]["Coulomb Interaction (eV)"]
+                Jxx_dipole = interactions[0]["Dipole-Dipole Interaction (eV)"]
+                Jyx_dipole = interactions[1]["Dipole-Dipole Interaction (eV)"]
+                Jxy_dipole = interactions[2]["Dipole-Dipole Interaction (eV)"]
+                Jyy_dipole = interactions[3]["Dipole-Dipole Interaction (eV)"]
+                Tx1 = excited_states[0].get("Transition Dipole Moment", None),
+                Ty1 = excited_states[1].get("Transition Dipole Moment", None),
+                Tx2 = excited_states[2].get("Transition Dipole Moment", None),
+                Ty2 = excited_states[3].get("Transition Dipole Moment", None),
+
+                if caldip:
+                    def calculate_dipole_dipole_interaction(dipole_1, dipole_2, r_vec):
+                        """
+                        Compute the dipole-dipole interaction energy between two dipoles.
+
+                        Parameters:
+                        dipole_1 (numpy array): Transition dipole moment vector for dipole 1.
+                        dipole_2 (numpy array): Transition dipole moment vector for dipole 2.
+                        r_vec (numpy array): Vector separating the two dipoles.
+
+                        Returns:
+                        float: Dipole-dipole interaction energy in eV.
+                        """
+
+                        r = np.linalg.norm(r_vec)  # Compute the magnitude of the distance vector
+                        if r == 0:
+                            raise ValueError("Distance between dipoles cannot be zero.")
+
+                        # Dipole-dipole interaction formula
+                        interaction_energy = ((np.dot(dipole_1, dipole_2) / r**3) -
+                                              (3 * np.dot(dipole_1, r_vec) * np.dot(dipole_2, r_vec) / r**5))
+
+                        return interaction_energy * 27.21  # Convert Hartree to eV
+
+                    trans_dip = [Tx1[0], Ty1[0]]
+                    dipole_matrix = np.zeros((2, 2))
+
+                    # Compute interaction energies for each combination of dipoles
+                    bohr_to_angstrom = 0.529177
+                    for i, dip1 in enumerate(trans_dip):
+                        for j, dip2 in enumerate(trans_dip):
+                            dipole_matrix[i, j] = calculate_dipole_dipole_interaction(dip1, dip2, distance_vec/bohr_to_angstrom)
+
+                    # Match the signs of Jdip loaded to Jdip calculated
+                    Jxx_dipcal, Jxy_dipcal = dipole_matrix[0]
+                    Jyx_dipcal, Jyy_dipcal = dipole_matrix[1]
+                    if np.sign(Jxx_dipcal) != np.sign(Jxx_dipole):
+                        Jxx_dipole *= -1.0
+                        Jxy_dipole *= -1.0
+                        Jyx_dipole *= -1.0
+                        Jyy_dipole *= -1.0
+                    if np.sign(Jxx_dipcal) != np.sign(Jxx_coul):
+                        Jxx_coul *= -1.0
+                        Jxy_coul *= -1.0
+                        Jyx_coul *= -1.0
+                        Jyy_coul *= -1.0
+                    print(f'dipcal: {Jxx_dipcal:.4f}, {Jxy_dipcal:.4f}, {Jyx_dipcal:.4f}, {Jyy_dipcal:.4f}')
+                    print(f'dipole: {Jxx_dipole:.4f}, {Jxy_dipole:.4f}, {Jyx_dipole:.4f}, {Jyy_dipole:.4f}')
+                    print(f'  coul: {Jxx_coul:.4f}, {Jxy_coul:.4f}, {Jyx_coul:.4f}, {Jyy_coul:.4f}')
+                    print()
+                
+                # excitation energy, transition dipole moments, storing J as 2 X 2 matrix
+                results = {
+                    "Qx1": excited_states[0].get("Excitation Energy (eV)", None),
+                    "Qy1": excited_states[1].get("Excitation Energy (eV)", None),
+                    "Qx2": excited_states[2].get("Excitation Energy (eV)", None),
+                    "Qy2": excited_states[3].get("Excitation Energy (eV)", None),
+                    "Tx1": excited_states[0].get("Transition Dipole Moment", None),
+                    "Ty1": excited_states[1].get("Transition Dipole Moment", None),
+                    "Tx2": excited_states[2].get("Transition Dipole Moment", None),
+                    "Ty2": excited_states[3].get("Transition Dipole Moment", None),
+                    "J_coul": np.array([
+                        [Jxx_coul, Jyx_coul],
+                        [Jxy_coul, Jyy_coul],
+                    ]),
+                    "J_dipole": np.array([
+                        [Jxx_dipole, Jyx_dipole],
+                        [Jxy_dipole, Jyy_dipole],
+                    ])
+                }
+                #print(length, results)
+                if distance_label in interaction_terms:
+                    interaction_terms[distance_label].append([distance_vec, results])
+                else:
+                    interaction_terms[distance_label] = [[distance_vec, results]]
+            else:
+                print(f'{json_file} has no defined interactions!')
         # error handling
         except Exception as e:
             if "No geometries found" not in str(e):
                 print(e)
+                traceback.print_exc()
             continue
-    # assign color to interactions based on distances
-    unique_lengths = {}
-    for value in lengths:
-        key = f'{value:.3f}'
-        if key not in unique_lengths:
-            unique_lengths[key] = value
 
-    # get the unique values and sort by magnitude
-    unique_lengths = sorted(unique_lengths.values(), key=abs)
-    for unique_length in unique_lengths:
-        key = f'{unique_length:.3f}'
-        interaction_terms[key]['color'] = colors[colors_index]
+    # assign color to interactions based on distances
+    unique_terms = sorted(interaction_terms.values(), key=lambda x: np.linalg.norm(x[0][0]))
+    for unique_term in unique_terms:
+        key = f'{np.linalg.norm(unique_term[0][0]):.3f}'
+        for interaction_term in interaction_terms[key]:
+            interaction_term[1]['color'] = colors[colors_index]
         colors_index += 1
+        #colors_index = ['b','r','g']
         if colors_index >= len(colors):
            colors_index = 0
+
+    # Deal with special cases by adding them each to respective
+    # list of interaction lengths and vectors
+    if len(combine) > 0:
+        key1, key2 = combine.split(',')
+        interaction_terms[key1].append(interaction_terms[key2][0])
+        interaction_terms[key2].append(interaction_terms[key1][0])
+           
     # Print and save data and write into a .dat file for later processing (visualization, etc.)
     r_min = [0] 
     r_max = [51]
@@ -427,14 +509,14 @@ def extract_interaction_terms(json_files: list):
         header = f'{"length":>10}  {"Qx1":>10} {"Qy1":>10} {"Tx1_x":>10} {"Tx1_y":>10} {"Tx1_z":>10} {"Ty1_x":>10} {"Ty1_y":>10} {"Ty1_z":>10} {"J_coul_xx":>10} {"J_coul_xy":>10} {"J_coul_yx":>10} {"J_coul_yy":>10} {"J_dipole_xx":>12} {"J_dipole_xy":>12} {"J_dipole_yx":>12} {"J_dipole_yy":>12}'
         print(header)
         output_file.write(header+'\n')
-        for index, rmin in enumerate(r_min):
-            rmax = r_max[index]
-            #print(f'{rmin:.2f} <= length < {rmax:.2f}')
-            for length, results in interaction_terms.items():
-                if rmin <= float(length) and float(length) < rmax:
-                    contents = f'{float(length):+10.4e}  {results["Qx1"]:+10.2e} {results["Qy1"]:+10.2e} {results["Tx1"][0]:+10.2e} {results["Tx1"][1]:+10.2e} {results["Tx1"][2]:+10.2e} {results["Ty1"][0]:+10.2e} {results["Ty1"][1]:+10.2e} {results["Ty1"][2]:+10.2e} {results["J_coul"][0][0]:+10.2e} {results["J_coul"][0][1]:+10.2e} {results["J_coul"][1][0]:+10.2e} {results["J_coul"][1][1]:+10.2e} {results["J_dipole"][0][0]:+12.2e} {results["J_dipole"][0][1]:+12.2e} {results["J_dipole"][1][0]:+12.2e} {results["J_dipole"][1][1]:+12.2e}'
+        for index, unique_term in enumerate(unique_terms):
+            for [distance_vec, results] in unique_term:
+                contents = f'{np.linalg.norm(distance_vec):+10.4e}  {results["Qx1"]:+10.2e} {results["Qy1"]:+10.2e} {results["Tx1"][0]:+10.2e} {results["Tx1"][1]:+10.2e} {results["Tx1"][2]:+10.2e} {results["Ty1"][0]:+10.2e} {results["Ty1"][1]:+10.2e} {results["Ty1"][2]:+10.2e} {results["J_coul"][0][0]:+10.2e} {results["J_coul"][0][1]:+10.2e} {results["J_coul"][1][0]:+10.2e} {results["J_coul"][1][1]:+10.2e} {results["J_dipole"][0][0]:+12.2e} {results["J_dipole"][0][1]:+12.2e} {results["J_dipole"][1][0]:+12.2e} {results["J_dipole"][1][1]:+12.2e}'
+                if len(unique_term) > 1:
+                    print('\033[1m'+contents+'\033[0m')
+                else:
                     print(contents)
-                    output_file.write(contents+'\n')
+                output_file.write(contents+'\n')
     return interaction_terms
 
 
@@ -707,12 +789,16 @@ def build_matrix(coordinates, identifiers, interaction_terms, r_cutoffs=[8, 10],
         # initialization of interaction term
         interaction_term = None
         # loop over pairwise interaction
-        for mi2 in range(mi1+1,len(coordinates)): # ensures pair-wise calculation only once
-            coord2 = coordinates[mi2]
+        for mi2, coord2 in enumerate(coordinates):
+            if mi2 == mi1:
+                continue
             mi2_identifiers = identifiers[mi2]
+
             # compute distance between molecules
-            distance = np.linalg.norm(coord1-coord2)
-            distance_z = np.abs(coord1[2]-coord2[2])
+            distance_vec = coord1-coord2
+            distance = np.linalg.norm(distance_vec)
+            distance_z = np.abs(distance_vec[2])
+            distance_label = f'{distance:.3f}'
             # loop over cutoff ranges 
             for ri, r_max in enumerate(r_cutoffs):
                 r_min = 0 if ri == 0 else r_cutoffs[ri-1]
@@ -720,25 +806,32 @@ def build_matrix(coordinates, identifiers, interaction_terms, r_cutoffs=[8, 10],
                 if distance < r_max and distance >= r_min and distance_z <= z_cutoff:
                     # find corresponding interaction terms 
                     if f'{distance:.3f}' in interaction_terms:
-                        interaction_term = interaction_terms[f'{distance:.3f}']
+                        interaction_term = interaction_terms[distance_label]
+
+                        closest_match = 0
+                        closest_match_val = np.dot(interaction_term[0][0]/np.linalg.norm(interaction_term[0][0]), distance_vec/np.linalg.norm(distance_vec))
+                        for term_index, [term_distance_vec, term_results] in enumerate(interaction_term):
+                            term_match_val = np.dot(term_distance_vec/np.linalg.norm(term_distance_vec), distance_vec/np.linalg.norm(distance_vec))
+                            if term_match_val > closest_match_val:
+                                closest_match_val = term_match_val
+                                closest_match = term_index
+                        print(f'({2*mi1:02}x{2*mi2:02}) {distance_label}, {closest_match_val:.3f}, {interaction_term[closest_match][1][coupling].flatten()[1]:.4f}, {interaction_term[closest_match][1][coupling].flatten()[2]:.4f}')
 
                         # Fill in the diagonal terms (Qs)
-                        matrix[2*mi1+0][2*mi1+0] = interaction_term['Qx'+mi1_identifiers]
-                        matrix[2*mi1+1][2*mi1+1] = interaction_term['Qy'+mi1_identifiers]
-                        matrix[2*mi2+0][2*mi2+0] = interaction_term['Qx'+mi2_identifiers]
-                        matrix[2*mi2+1][2*mi2+1] = interaction_term['Qy'+mi2_identifiers]
+                        matrix[2*mi1+0][2*mi1+0] = interaction_term[closest_match][1]['Qx'+mi1_identifiers]
+                        matrix[2*mi1+1][2*mi1+1] = interaction_term[closest_match][1]['Qy'+mi1_identifiers]
+                        matrix[2*mi2+0][2*mi2+0] = interaction_term[closest_match][1]['Qx'+mi2_identifiers]
+                        matrix[2*mi2+1][2*mi2+1] = interaction_term[closest_match][1]['Qy'+mi2_identifiers]
 
                         # Fill in the off-diagonal terms (Js), upper and lower
-                        matrix[2*mi2:2*mi2+2,2*mi1:2*mi1+2] = interaction_term[coupling]
-                        matrix[2*mi1:2*mi1+2,2*mi2:2*mi2+2] = interaction_term[coupling]
+                        matrix[2*mi1:2*mi1+2,2*mi2:2*mi2+2] = interaction_term[closest_match][1][coupling]
                        
-
         if interaction_term is None:
             interaction_term = [val for key, val in interaction_terms.items()][0]
-        trans_dip[2*mi1+0] = interaction_term['Tx1']
-        trans_dip[2*mi1+1] = interaction_term['Ty1']
-        matrix[2*mi1+0][2*mi1+0] = interaction_term['Qx'+mi1_identifiers]
-        matrix[2*mi1+1][2*mi1+1] = interaction_term['Qy'+mi1_identifiers]
+        trans_dip[2*mi1+0] = interaction_term[0][1]['Tx1']
+        trans_dip[2*mi1+1] = interaction_term[0][1]['Ty1']
+        matrix[2*mi1+0][2*mi1+0] = interaction_term[0][1]['Qx'+mi1_identifiers]
+        matrix[2*mi1+1][2*mi1+1] = interaction_term[0][1]['Qy'+mi1_identifiers]
     return matrix, trans_dip
 
 
@@ -972,7 +1065,7 @@ def plot_system(ax, mol_coordinates, mol_identifiers, atom_coordinates,
                     interaction_counts[r_min_max_index] += 2
                     distance_label = f'{distance:.3f}'
                     if distance_label in interaction_terms and len(mol_coordinates) <= 120:
-                        distance_color=interaction_terms[distance_label]['color']
+                        distance_color=interaction_terms[distance_label][0][1]['color']
     
                         if distance_label in distance_colors:
                             #continue
@@ -1011,7 +1104,6 @@ if __name__ == "__main__":
     parser.add_argument("--digitized", type=str, default="", help="Specify a file with digitized data from experimental results.")
     parser.add_argument("--eshift", type=float, default=0.0, help="Specify a shift in energy when calculating the lorentzian spectral weight.")
     parser.add_argument("--save", action='store_true', help="Save the plots rather than showing them.")
-    
     
     # Parse arguments
     args = parser.parse_args()
@@ -1069,6 +1161,8 @@ if __name__ == "__main__":
         # iterating through different functionals, JSON files
         # Split the functional string into multiple functionals
         configuration_index = 0
+
+        system_matrix = []
         for functional in functionals:
             # Construct the base folder path for the molecule
             base_folder = os.path.join('..', 'systems', 'Qchem_files', args.molecule, functional)
@@ -1108,6 +1202,7 @@ if __name__ == "__main__":
                         
                         # build TB-Hamiltonian
                         matrix, trans_dip = build_matrix(mol_coordinates, mol_identifiers, interaction_terms, r_cutoffs=r_cutoffs, z_cutoff=args.zcut, coupling=coupling)
+                        system_matrix.append(matrix)
 
                         # build the plot labels
                         if (rows > 1 and cols == 1 and layers == 1 and zigzag == 0):
@@ -1186,7 +1281,7 @@ if __name__ == "__main__":
                             factor = spectral_max / max(spectral_weight)
 
                             if config_count == 1:
-                                line, = axes.plot(wavelength_range, factor * spectral_weight, label=dlabel)
+                                line, = axes.plot(wavelength_range, factor * spectral_weight, label=label)
                                 if len(centers) < 20:
                                     for center in centers:
                                         wavelength = wavelength_range[center]
@@ -1195,23 +1290,46 @@ if __name__ == "__main__":
                                         axes.plot(xvals, yvals, linestyle='--', linewidth=4, label=f'{wavelength:.1f}nm')
                                     axes.legend(fontsize=24, frameon=False)
                             else:
-                                line, = axes.plot(wavelength_range, factor * spectral_weight, linewidth=4, linestyle = dlinestyle, color=dcolor, label=f'{dlabel}') #, label=label+f' ({area/1e9:.2f})'
+                                line, = axes.plot(wavelength_range, factor * spectral_weight, linestyle=dlinestyle, color=dcolor, linewidth=4, label=f'{dlabel}') #, label=label+f' ({area/1e9:.2f})'
                                 axes.legend(fontsize=24, loc='best', bbox_to_anchor=(0.75, 0.85), borderaxespad=0.5, frameon=False)
                             axes.set_ylabel(f'Absorbance', fontsize=30)
-                            axes.text(705, 1.1*spectral_max, r'PBE functional: 1D', fontsize=30) # PR later for generalization
-                            axes.text(-0.1, 1, r'(a)', fontsize=30 , transform=axes.transAxes, clip_on=False)      # PR later for generalization
+                            axes.text(705, 1.1*spectral_max, r'PBE0, 1NN-10$\AA$, $\Delta$E$_{shift}$ = 0.43 eV', fontsize=30) # PR later for generalization
+                            axes.text(-0.1, 1, r'(d)', fontsize=30 , transform=axes.transAxes, clip_on=False)      # PR later for generalization
                             axes.tick_params(axis="x", labelsize=30)
                             axes.tick_params(axis="y", labelsize=30)
                             axes.set_ylim(0,1.2*spectral_max)
                             axes.set_xlabel('Wavelength (nm)', fontsize=30)
 
+    print("Difference matrix")
+    for mat_index in range(1, len(system_matrix)):
+        mat_diff = system_matrix[mat_index] - system_matrix[mat_index-1]
+        for index, row in enumerate(mat_diff.T):
+            print_it = f'{index:03}:'
+            for col in row:
+                val = f'{col:.3f}'
+                print_it += f' {val:>8}'
+            print(print_it)
+    
+    print("Symmetric matrix")
+    for mat_index in range(0, len(system_matrix)):
+        mat_symm = system_matrix[mat_index]
+        for i in range(len(mat_symm[0])):
+            for j in range(i+1, len(mat_symm[0])): 
+                mat_symm[i][j], mat_symm[j][i] = mat_symm[i][j] - mat_symm[j][i], mat_symm[j][i] - mat_symm[i][j]
+        for index, row in enumerate(mat_symm.T):
+            print_it = f'{index:03}:'
+            for col in row:
+                val = f'{col:.3f}'
+                print_it += f' {val:>8}'
+            print(print_it)
+
     if len(args.digitized) > 0:
         axes.legend(fontsize=24, loc='best', borderaxespad=0.5, frameon=False) #
         axes.legend(fontsize=24, loc='best', frameon=False)
     if args.save:
-        fig.savefig(functional + '_' + label.replace(',','-').replace(' ','') + f'_{args.zcut}_{args.eshift}_spectrum.png')
+        fig.savefig(functional + '_' + label.replace(',','-').replace(' ','') + f'_{args.rcut}_{args.eshift}_spectrum_2D.pdf')
     else:
-        #fig.savefig('convergence-check-PBE-1d-AB.pdf', bbox_inches='tight') # PR later
+        fig.savefig('PBE0-1d-coul-NN-10.pdf', bbox_inches='tight') # PR later
         plt.show()
 
 
