@@ -2,6 +2,11 @@
 
 This repository provides a codebase for parsing Q-Chem output and constructing tight-binding Hamiltonians for excitonic systems. The codebase is organized into two main stages and supports flexible system dimensionality (1D, 2D, 3D) for model building and comparison with experiment.
 
+# Dependencies
+
+- Python ≥ 3.7
+- NumPy
+- JSON (Python standard library)
 ---
 
 
