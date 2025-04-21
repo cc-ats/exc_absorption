@@ -66,6 +66,7 @@ from matplotlib import colors
 from mpl_toolkits.mplot3d import Axes3D
 from scipy.special import wofz
 from scipy.integrate import simpson
+from scipy.optimize import minimize_scalar, minimize
 import traceback
 
 
@@ -214,6 +215,7 @@ def extract_molecule_data(center_molecule, json_files: list, r_cutoffs=[8,10], z
     json_cache = {}
     for json_index, json_file in enumerate(json_files):
         with open(json_file, 'r') as file:
+            print(file)
             json_cache[json_index] = json.load(file)
 
     
@@ -321,7 +323,7 @@ def extract_molecule_data(center_molecule, json_files: list, r_cutoffs=[8,10], z
     return molecule_data, unique_molecules
 
 
-def extract_interaction_terms(json_files: list, combine='14.014,14.013', caldip=True):
+def extract_interaction_terms(json_files: list, combine='14.014,14.013', caldip=False):
     """
     Extracts interaction terms and excited state properties from a list of molecular dimer JSON files.
     
@@ -399,6 +401,11 @@ def extract_interaction_terms(json_files: list, combine='14.014,14.013', caldip=
                 Ty1 = excited_states[1].get("Transition Dipole Moment", None),
                 Tx2 = excited_states[2].get("Transition Dipole Moment", None),
                 Ty2 = excited_states[3].get("Transition Dipole Moment", None),
+                
+                Tx1u = excited_states[0].get("Transition Dipole Moment unmodified", None),
+                Ty1u = excited_states[1].get("Transition Dipole Moment unmodified", None),
+                Tx2u = excited_states[2].get("Transition Dipole Moment unmodified", None),
+                Ty2u = excited_states[3].get("Transition Dipole Moment unmodified", None),
 
                 if caldip:
                     def calculate_dipole_dipole_interaction(dipole_1, dipole_2, r_vec):
@@ -425,6 +432,7 @@ def extract_interaction_terms(json_files: list, combine='14.014,14.013', caldip=
                         return interaction_energy * 27.21  # Convert Hartree to eV
 
                     trans_dip = [Tx1[0], Ty1[0]]
+                    print(trans_dip)
                     dipole_matrix = np.zeros((2, 2))
 
                     # Compute interaction energies for each combination of dipoles
@@ -436,20 +444,49 @@ def extract_interaction_terms(json_files: list, combine='14.014,14.013', caldip=
                     # Match the signs of Jdip loaded to Jdip calculated
                     Jxx_dipcal, Jxy_dipcal = dipole_matrix[0]
                     Jyx_dipcal, Jyy_dipcal = dipole_matrix[1]
+                    
+                    print_it = True
+                    if (
+                            np.sign(Jxx_dipcal) != np.sign(Jxx_coul) or
+                            np.sign(Jxy_dipcal) != np.sign(Jxy_coul) or
+                            np.sign(Jyx_dipcal) != np.sign(Jyx_coul) or
+                            np.sign(Jyy_dipcal) != np.sign(Jyy_coul) or
+                            np.sign(Jxx_dipcal) != np.sign(Jxx_dipole) or
+                            np.sign(Jxy_dipcal) != np.sign(Jxy_dipole) or
+                            np.sign(Jyx_dipcal) != np.sign(Jyx_dipole) or
+                            np.sign(Jyy_dipcal) != np.sign(Jyy_dipole)
+                       ):
+                        print_it = True
+                        print(f'distance: {np.linalg.norm(distance_vec):.3f}')
+                        print(f' BEFORE FLIP:')
+                        print(f'  dipcal: {Jxx_dipcal:.4f}, {Jxy_dipcal:.4f}, {Jyx_dipcal:.4f}, {Jyy_dipcal:.4f}')
+                        print(f'  dipole: {Jxx_dipole:.4f}, {Jxy_dipole:.4f}, {Jyx_dipole:.4f}, {Jyy_dipole:.4f}')
+                        print(f'  coul  : {Jxx_coul:.4f}, {Jxy_coul:.4f}, {Jyx_coul:.4f}, {Jyy_coul:.4f}')
+                    threshold = 1e-6  # Small number to avoid floating-point issues
+
+                    def sign_with_threshold(value):
+                        return np.sign(value) if abs(value) > threshold else 0  # Returns 0 if near zero
+                    
                     if np.sign(Jxx_dipcal) != np.sign(Jxx_dipole):
-                        Jxx_dipole *= -1.0
-                        Jxy_dipole *= -1.0
-                        Jyx_dipole *= -1.0
-                        Jyy_dipole *= -1.0
-                    if np.sign(Jxx_dipcal) != np.sign(Jxx_coul):
+                        Jxx_dipole *= -1.0 
                         Jxx_coul *= -1.0
+                    if np.sign(Jxy_dipcal) != np.sign(Jxy_dipole):
+                        Jxy_dipole *= -1.0
                         Jxy_coul *= -1.0
+                    if np.sign(Jyx_dipcal) != np.sign(Jyx_dipole):
+                        Jyx_dipole *= -1.0
                         Jyx_coul *= -1.0
+                    if np.sign(Jyy_dipcal) != np.sign(Jyy_dipole):
+                        Jyy_dipole *= -1.0
                         Jyy_coul *= -1.0
-                    print(f'dipcal: {Jxx_dipcal:.4f}, {Jxy_dipcal:.4f}, {Jyx_dipcal:.4f}, {Jyy_dipcal:.4f}')
-                    print(f'dipole: {Jxx_dipole:.4f}, {Jxy_dipole:.4f}, {Jyx_dipole:.4f}, {Jyy_dipole:.4f}')
-                    print(f'  coul: {Jxx_coul:.4f}, {Jxy_coul:.4f}, {Jyx_coul:.4f}, {Jyy_coul:.4f}')
-                    print()
+
+                    if print_it:
+                        print(f' AFTER FLIP:')
+                        print(f'  dipole: {Jxx_dipole:.4f}, {Jxy_dipole:.4f}, {Jyx_dipole:.4f}, {Jyy_dipole:.4f}')
+                        print(f'  coul  : {Jxx_coul:.4f}, {Jxy_coul:.4f}, {Jyx_coul:.4f}, {Jyy_coul:.4f}')
+                        print()
+                        #exit()
+
                 
                 # excitation energy, transition dipole moments, storing J as 2 X 2 matrix
                 results = {
@@ -571,7 +608,7 @@ def calculate_center_of_mass(atoms, coordinates):
     return center_of_mass
 
 
-def build_system(cols, rows, molecule_data, layers=1, zigzag=0):
+def build_system(cols, rows, molecule_data, layers=1, zigzag=0, remove=0):
     """
     Builds a molecular system in 1D, 2D, or 3D by arranging molecules according to extracted molecular data.
     
@@ -731,7 +768,12 @@ def build_system(cols, rows, molecule_data, layers=1, zigzag=0):
                         atm_identifiers.append(a_atoms)
                     mol_layer.append(layer)
                     distance = np.linalg.norm(mol_coordinates[-1]-mol_coordinates[-2])
-                    
+
+    if remove > 0:
+        for i in range(remove):
+            if len(mol_coordinates) > 1 and len(atm_coordinates) > 1:
+                mol_coordinates.pop(0)
+                atm_coordinates.pop(0)
        
 
     # move the entire system about the origin, which will clean up the plot nicely
@@ -803,20 +845,23 @@ def build_matrix(coordinates, identifiers, interaction_terms, r_cutoffs=[8, 10],
             for ri, r_max in enumerate(r_cutoffs):
                 r_min = 0 if ri == 0 else r_cutoffs[ri-1]
                 # check if distance within certain cutoff ranges
-                if distance < r_max and distance >= r_min and distance_z <= z_cutoff:
+                if distance < r_max and distance >= r_min and distance_z <= z_cutoff: # remove if not used z_cutoff
                     # find corresponding interaction terms 
                     if f'{distance:.3f}' in interaction_terms:
                         interaction_term = interaction_terms[distance_label]
 
                         closest_match = 0
-                        closest_match_val = np.dot(interaction_term[0][0]/np.linalg.norm(interaction_term[0][0]), distance_vec/np.linalg.norm(distance_vec))
+                        closest_match_val = 0 #np.dot(interaction_term[0][0]/np.linalg.norm(interaction_term[0][0]), distance_vec/np.linalg.norm(distance_vec))
                         for term_index, [term_distance_vec, term_results] in enumerate(interaction_term):
                             term_match_val = np.dot(term_distance_vec/np.linalg.norm(term_distance_vec), distance_vec/np.linalg.norm(distance_vec))
-                            if term_match_val > closest_match_val:
-                                closest_match_val = term_match_val
+                            if np.abs(term_match_val) > closest_match_val:
+                                closest_match_val = np.abs(term_match_val)
                                 closest_match = term_index
+                                transpose = False if np.sign(term_match_val) > 0 else True
+                                #print(closest_match, transpose, mi1, mi2, distance_vec, term_distance_vec, term_match_val )
+                                    
                         print(f'({2*mi1:02}x{2*mi2:02}) {distance_label}, {closest_match_val:.3f}, {interaction_term[closest_match][1][coupling].flatten()[1]:.4f}, {interaction_term[closest_match][1][coupling].flatten()[2]:.4f}')
-
+                        print(closest_match)
                         # Fill in the diagonal terms (Qs)
                         matrix[2*mi1+0][2*mi1+0] = interaction_term[closest_match][1]['Qx'+mi1_identifiers]
                         matrix[2*mi1+1][2*mi1+1] = interaction_term[closest_match][1]['Qy'+mi1_identifiers]
@@ -824,12 +869,17 @@ def build_matrix(coordinates, identifiers, interaction_terms, r_cutoffs=[8, 10],
                         matrix[2*mi2+1][2*mi2+1] = interaction_term[closest_match][1]['Qy'+mi2_identifiers]
 
                         # Fill in the off-diagonal terms (Js), upper and lower
-                        matrix[2*mi1:2*mi1+2,2*mi2:2*mi2+2] = interaction_term[closest_match][1][coupling]
+                        if transpose:
+                            matrix[2*mi1:2*mi1+2,2*mi2:2*mi2+2] = interaction_term[closest_match][1][coupling].T
+                        else:
+                            matrix[2*mi1:2*mi1+2,2*mi2:2*mi2+2] = interaction_term[closest_match][1][coupling]
                        
         if interaction_term is None:
             interaction_term = [val for key, val in interaction_terms.items()][0]
         trans_dip[2*mi1+0] = interaction_term[0][1]['Tx1']
+        print(trans_dip[2*mi1+0])
         trans_dip[2*mi1+1] = interaction_term[0][1]['Ty1']
+        print(trans_dip[2*mi1+1])
         matrix[2*mi1+0][2*mi1+0] = interaction_term[0][1]['Qx'+mi1_identifiers]
         matrix[2*mi1+1][2*mi1+1] = interaction_term[0][1]['Qy'+mi1_identifiers]
     return matrix, trans_dip
@@ -905,7 +955,7 @@ def voigt_spectral_weight(wavelength_range, eigenvalues, f, gamma=1.0,
 
     return spectral_weight
 
-def get_spectrum(eigenvalues, oscillator_strengths, wavelength_min=3e-7, wavelength_max=10e-7, gamma=1e-11, E0=0.0):
+def get_spectrum(eigenvalues, oscillator_strengths, wavelength_min=3e-7, wavelength_max=10e-7, gamma=1e-11, E0=0.0, size=200000):
     """
     Computes the spectral distribution using Voigt profile and identifies spectral peak centers.
 
@@ -945,11 +995,12 @@ def get_spectrum(eigenvalues, oscillator_strengths, wavelength_min=3e-7, wavelen
 
     """
     # wavelength range
-    wavelength_range = np.linspace(wavelength_min, wavelength_max, 200000)
+    wavelength_range = np.linspace(wavelength_min, wavelength_max, size)
     spectral_weight = voigt_spectral_weight(wavelength_range, eigenvalues, oscillator_strengths, gamma=gamma, E0=E0)
        
     # Convert wavelength to nm
     wavelength_range *= 1e9
+    #print(wavelength_range)
 
     # Determine spectral peak centers
     i = 2 # atleast two points before and after
@@ -963,6 +1014,35 @@ def get_spectrum(eigenvalues, oscillator_strengths, wavelength_min=3e-7, wavelen
 
         return wavelength_range, spectral_weight, centers
 
+# Function to compute area given E0 and compare with experimental data
+def compute_area(E0, eigenvalues, f1, args, wavelengths_exp, intensities_exp, spectral_max):
+    # Compute theoretical spectrum
+    wavelength_range, spectral_weight, _ = get_spectrum(
+        eigenvalues,
+        f1,
+        wavelength_min=min(wavelengths_exp)*1e-9,
+        wavelength_max=max(wavelengths_exp)*1e-9,
+        gamma=args.gamma,
+        E0=E0[0],
+        size=len(wavelengths_exp)
+    )
+
+    
+    #area_diff = intensities_exp-spectral_weight
+    factor = spectral_max / max(spectral_weight)
+    area_diff = sum(abs(intensities_exp-factor*spectral_weight))
+    print(E0[0], area_diff, max(intensities_exp), max(factor*spectral_weight)) 
+    
+    # Normalize theoretical spectrum
+    #area_theory = simpson(spectral_weight, x=wavelength_range)
+    #spectral_weight /= area_theory  # Normalize
+
+    # Compute experimental area
+    #area_exp = simpson(intensities_exp, x=wavelengths_exp)
+
+    # Objective: Minimize the difference in areas
+    #return abs(area_theory - area_exp)
+    return area_diff
 
 # helper function for plotting/visualization
 
@@ -1098,6 +1178,7 @@ if __name__ == "__main__":
     parser.add_argument("--rcut", type=str, default='8,10', help="R cutoffs for each system specified as 8,10;8,10,15")
     parser.add_argument("--replicas", type=int, default=1, help="Number of unit cells to draw in all dimensions.")
     parser.add_argument("--zigzag", type=str, default="null", help="Select a zigzag configuration for each system, Use system X,1,1 to specify number of molecules. 0 disables, 1 is first type and 2 is second type.")
+    parser.add_argument("--remove", type=str, default="null", help="Remove the specified number of molecules from the front of the list when building the system, specified as semi-colon separated list.")
     parser.add_argument("--coupling", type=str, default='J_coul', help="Coupling: J_coul, J_dipole or J_both e.g. J_coul;J_dipole")
     parser.add_argument("--gamma", type=float, help="Broadening parameter.")
     parser.add_argument("--atoms", action='store_true', help="Show atoms in plot.")
@@ -1122,12 +1203,14 @@ if __name__ == "__main__":
     
     # experimental data processing; check if user provided digitized experimental data
     spectral_max = -1
+    wavelengths_exp = []
+    intensities_exp = []
     if len(args.digitized) > 0:
         file_path = args.digitized
 
         # Read experimental data
-        wavelengths = []
-        intensities = []
+        #wavelengths = []
+        #intensities = []
 
         # Process the file
         with open(file_path, 'r') as file:
@@ -1139,197 +1222,233 @@ if __name__ == "__main__":
                    
                     # Append values to the respective lists
                     try:
-                        wavelengths.append(float(values[0]))
-                        intensities.append(float(values[1]))
+                        wavelengths_exp.append(float(values[0]))
+                        intensities_exp.append(float(values[1]))
                     except ValueError:
                         print(f"Skipping line due to conversion error: {line}")
 
         # Calculate half intensities
-        wavelengths = np.array(wavelengths)
-        intensities = np.array(intensities)
-        half_intensities = np.array([y / 2 for y in intensities])
+        wavelengths_exp = np.array(wavelengths_exp)
+        intensities_exp = np.array(intensities_exp)
+        half_intensities = np.array([y / 2 for y in intensities_exp])
 
         # find maximum intensity above wavelength 897nm (hard coded from experimental data)
-        spectral_max = np.max(intensities[np.where(wavelengths>897)])
+        spectral_max = np.max(intensities_exp[np.where(wavelengths_exp>897)])
 
         # plot experimental data
-        axes.plot(wavelengths, intensities, marker='o', linestyle='-', color='b', label="Expt.", zorder=0)
+        axes.plot(wavelengths_exp, intensities_exp, marker='o', linestyle='-', color='b', label="Expt.", zorder=0)
         axes.set_xlim(700,1100)
         axes.legend(fontsize=24, loc='best', frameon=False)
         
+    # iterating through different functionals, JSON files
+    # Split the functional string into multiple functionals
+    configuration_index = 0
+
+    system_matrix = []
+    for functional in functionals:
+        # Construct the base folder path for the molecule
+        base_folder = os.path.join('..', 'systems', 'Qchem_files', args.molecule, functional)
+
+        # Find all JSON files in the specified folder
+        json_files = find_json_files(base_folder)
+        #print(json_files)
+       
+        # Collect all molecule data here with all possible cutoffs in case we need to use a layered system later, first molecular pair (dimer) = [0,1]
+        molecule_data, unique_molecules = extract_molecule_data([0,1], json_files, r_cutoffs=[8,10,15,17,28,30,32,36,41,np.inf], z_cutoff=np.inf)
+        interaction_terms = extract_interaction_terms(json_files)
         
-        # iterating through different functionals, JSON files
-        # Split the functional string into multiple functionals
-        configuration_index = 0
+        
+        # iterates over system configurations, constructs molecular structures, builds matrices, and diagonalizes them
+        for system_index, system in enumerate(systems):
+            # extract dimensions
+            rows, cols, layers = [int(dim) for dim in system.split(',')]
 
-        system_matrix = []
-        for functional in functionals:
-            # Construct the base folder path for the molecule
-            base_folder = os.path.join('..', 'systems', 'Qchem_files', args.molecule, functional)
+            # extract zigzag as well
+            for rcut_index, rcut in enumerate(rcuts):
+                # extract r cutoffs
+                r_cutoffs = [float(r) for r in rcut.split(',')]
+                label = f'{r_cutoffs}'
 
-            # Find all JSON files in the specified folder
-            json_files = find_json_files(base_folder)
-            #print(json_files)
-           
-            # Collect all molecule data here with all possible cutoffs in case we need to use a layered system later, first molecular pair (dimer) = [0,1]
-            molecule_data, unique_molecules = extract_molecule_data([0,1], json_files, r_cutoffs=[8,10,15,17,28,30,32,36,41,np.inf], z_cutoff=np.inf)
-            interaction_terms = extract_interaction_terms(json_files)
-            
-            
-            # iterates over system configurations, constructs molecular structures, builds matrices, and diagonalizes them
-            for system_index, system in enumerate(systems):
-                # extract dimensions
-                rows, cols, layers = [int(dim) for dim in system.split(',')]
+                for coupling in couplings:
+                    zigzag = 0
+                    if args.zigzag != 'null':
+                        zigzags = args.zigzag.split(';')
+                        if len(zigzags) > configuration_index:
+                            zigzag = int(zigzags[configuration_index])
+                    remove = 0
+                    if args.remove!= 'null':
+                        removes = args.remove.split(';')
+                        if len(removes) > configuration_index:
+                            remove = int(removes[configuration_index])
+                    configuration_index += 1 # tracks configurations
 
-                # extract zigzag as well
-                for rcut_index, rcut in enumerate(rcuts):
-                    # extract r cutoffs
-                    r_cutoffs = [float(r) for r in rcut.split(',')]
-                    label = f'{r_cutoffs}'
+                    #label = f'{functional}: {rows}x{cols}x{layers}, {r_cutoffs}, {coupling}'
 
-                    for coupling in couplings:
-                        zigzag = 0
-                        if args.zigzag != 'null':
-                            zigzags = args.zigzag.split(';')
-                            if len(zigzags) > configuration_index:
-                                zigzag = int(zigzags[configuration_index])
-                        configuration_index += 1 # tracks configurations
+                    # build molecular systems
+                    mol_coordinates, mol_identifiers, atm_coordinates, atm_identifiers, mol_layers = build_system(cols, rows, molecule_data, layers=layers, zigzag=zigzag, remove=remove)
+                    
+                    # build TB-Hamiltonian
+                    matrix, trans_dip = build_matrix(mol_coordinates, mol_identifiers, interaction_terms, r_cutoffs=r_cutoffs, z_cutoff=args.zcut, coupling=coupling)
+                    system_matrix.append(matrix)
 
-                        #label = f'{functional}: {rows}x{cols}x{layers}, {r_cutoffs}, {coupling}'
+                    # build the plot labels
+                    if (len(mol_coordinates) == 1):
+                        # This is the second zigzag label
+                        dlabel = 'Monomer'
+                        dcolor='grey'
+                        dlinestyle='solid'
+                    elif (len(mol_coordinates) == 2):
+                        distance = f'{np.linalg.norm(mol_coordinates[0]-mol_coordinates[1]):.3f}'
+                        print(distance)
+                        distance_dict = {
+                            '7.435': ['Dimer-A', 'magenta', 'dashed'],
+                            '9.741': ['Dimer-B', 'cyan', 'dotted'],
+                            '9.903': ['Dimer-C', 'green', '-.'],
+                        }
+                        # This is the second zigzag label
+                        dlabel, dcolor, dlinestyle = distance_dict[distance]
+                        #dmarker='d'
+                    elif (rows > 1 and cols == 1 and layers == 1 and zigzag == 0):
+                        # This is the armchair label
+                        dlabel = '1D-BACA'
+                        dcolor='darkgoldenrod'
+                        #dmarker= 's'
+                        dlinestyle='dotted'
+                    elif (rows == 2 and cols > 1 and layers == 1 and zigzag == 0):
+                        # This is the first zigzag label
+                        dlabel = '1D-BC'
+                        dcolor='black'
+                        #dmarker='*'
+                        dlinestyle = 'dashdot'
+                    elif (rows > 1 and cols == 1 and layers == 1 and zigzag == 1):
+                        # This is the second zigzag label
+                        dlabel = '1D-AB'
+                        dcolor='red'
+                        #dmarker='v'
+                        dlinestyle='solid' #dashdot
+                    elif (rows > 1 and cols == 1 and layers == 1 and zigzag == 2):
+                        # This is the second zigzag label
+                        dlabel = '1D-AC'
+                        dcolor='violet'
+                        #dmarker='d'
+                        dlinestyle='dashed'
+                    elif layers == 1:
+                        dlabel = '2D'
+                        dcolor='orange'
+                        dlinestyle='solid'
+                    else:
+                        dlabel = '3D'
+                        dcolor='g'
+                        dlinestyle='solid'
 
-                        # build molecular systems
-                        mol_coordinates, mol_identifiers, atm_coordinates, atm_identifiers, mol_layers = build_system(cols, rows, molecule_data, layers=layers, zigzag=zigzag)
-                        
-                        # build TB-Hamiltonian
-                        matrix, trans_dip = build_matrix(mol_coordinates, mol_identifiers, interaction_terms, r_cutoffs=r_cutoffs, z_cutoff=args.zcut, coupling=coupling)
-                        system_matrix.append(matrix)
+                    # print matrices for debugging, attempt smaller systems
+                    molecules = rows*cols*layers
+                    if molecules < 20:
+                        for index, row in enumerate(matrix.T):
+                            print_it = f'{index:03}:'
+                            for col in row:
+                                val = f'{col:.3f}'
+                                print_it += f' {val:>8}'
+                            print(print_it)
 
-                        # build the plot labels
-                        if (rows > 1 and cols == 1 and layers == 1 and zigzag == 0):
-                            # This is the armchair label
-                            dlabel = '1D-BACA'
-                            dcolor='darkgoldenrod'
-                            #dmarker= 's'
-                            dlinestyle='dotted'
-                        elif (rows == 2 and cols > 1 and layers == 1 and zigzag == 0):
-                            # This is the first zigzag label
-                            dlabel = '1D-BC'
-                            dcolor='black'
-                            #dmarker='*'
-                            dlinestyle = 'dashdot'
-                        elif (rows > 1 and cols == 1 and layers == 1 and zigzag == 1):
-                            # This is the second zigzag label
-                            dlabel = '1D-AB'
-                            dcolor='red'
-                            #dmarker='v'
-                            dlinestyle='solid' #dashdot
-                        elif (rows > 1 and cols == 1 and layers == 1 and zigzag == 2):
-                            # This is the second zigzag label
-                            dlabel = '1D-AC'
-                            dcolor='violet'
-                            #dmarker='d'
-                            dlinestyle='dashed'
-                        elif layers == 1:
-                            dlabel = '2D'
-                            dcolor='orange'
+                    # diagonalize TB ham for eigenvalues and eigenvectors
+                    eigenvalues, eigenvectors = np.linalg.eigh(matrix)
+                    # print eigenvalues and eigenvectors for debugging
+                    """if molecules < 20:
+                        for i, ev in enumerate(eigenvectors.T):
+                            print_it = f'{i:02} ({eigenvalues[i]:.3f}):'
+                            for j in list(reversed(np.argsort(np.abs(ev)))):#find indices for largest component
+                                val = ev[j]
+                                print_it += f' ({j:02},{val:.3f})' if val < 0 else f' ({j:02}, {val:.3f})'
+
+                            for val in ev:
+                                print_it += f' {val:.3f}' if val < 0 else f' {val:.4f}'
+                            print(print_it)"""
+                    # calculate oscillator strength        
+                    f1 = (2.0 / 3.0) * np.einsum('k,ik,jk,ix,jx->k', eigenvalues / 27.21, eigenvectors.T, eigenvectors.T, trans_dip, trans_dip)  
+                    
+                    
+                    # Optimize E0 if there is experimental data to compare against
+                    if len(args.digitized) > 0:
+                        #res = minimize_scalar(compute_area, bounds=(0.0, 1.0), args=(eigenvalues, f1, args, wavelengths_exp, intensities_exp, spectral_max), method='bounded')
+                        res = minimize(compute_area, [args.eshift], args=(eigenvalues, f1, args, wavelengths_exp, intensities_exp, spectral_max))
+                        optimized_E0 = res.x[0]
+                        print("Optimization Result:")
+                        print(f"Success: {res.success}")  # True if optimization was successful
+                        print(f"Message: {res.message}")  # Optimization termination message
+                        print(f"Iterations: {res.nit}")   # Number of iterations
+                        print(f"Function Evaluations: {res.nfev}")  # Number of function evaluations
+                        print(f"Initial E0: {args.eshift}")  # Original E0 value
+                        print(f"Optimized E0: {res.x}")  # Optimized E0 value
+                        print(f"Improvement in Area: {-res.fun}")  # The maximum area achieved
+                    else:
+                        optimized_E0 = args.eshift
+                    
+                    
+                    
+                    # loop over spectral weight, compute spectral weight with f1, PR add-on IPR f2
+                    for i, f in enumerate([f1]):
+                        wavelength_range, spectral_weight, centers = get_spectrum(
+                                eigenvalues,
+                                f,
+                                wavelength_min=7e-7,
+                                wavelength_max=11e-7,
+                                gamma=args.gamma,
+                                E0=optimized_E0
+                        )
+                        # use area to normalize
+                        area = simpson(spectral_weight, x=wavelength_range)
+                        spectral_weight /= area
+                        # 
+                        if spectral_max == -1:
+                            spectral_max = max(spectral_weight)
+                        factor = spectral_max / max(spectral_weight)
+
+                        if config_count == 1:
+                            line, = axes.plot(wavelength_range, factor * spectral_weight, label=dlabel, linestyle=dlinestyle, color=dcolor, linewidth=4)#, label=f'Theory (Optimized $E_0$={optimized_E0:.3f})')
+                            if len(centers) < 20:
+                                for center in centers:
+                                    wavelength = wavelength_range[center]
+                                    xvals = [wavelength, wavelength]
+                                    yvals = [0, factor * spectral_weight[center]]
+                                    axes.plot(xvals, yvals, linestyle='--', linewidth=4, label=f'{wavelength:.1f}nm')
+                                axes.legend(fontsize=24, frameon=False, loc='best')
                         else:
-                            dlabel = '3D'
-                            dcolor='g'
+                            line, = axes.plot(wavelength_range, factor * spectral_weight, label=dlabel+f', $\Delta E_{{shift}}$={optimized_E0:.2f}eV', linestyle=dlinestyle, color=dcolor,linewidth=4) #label=rf"{r_cutoffs}, $\Delta E_{{shift}}$={optimized_E0:.2f}eV") #, label=label+f' ({area/1e9:.2f})'
+                            axes.legend(fontsize=24, loc='upper left', frameon=False)
+                        axes.set_ylabel(f'Absorbance', fontsize=30)
+                        axes.text(700, 1.1*spectral_max, r'PBE0', fontsize=30) # PR later for generalization
+                        #axes.text(-0.1, 1, r'(j)', fontsize=30 , transform=axes.transAxes, clip_on=False)      # PR later for generalization
+                        axes.tick_params(axis="x", labelsize=30)
+                        axes.tick_params(axis="y", labelsize=30)
+                        axes.set_ylim(0,1.4*spectral_max)
+                        axes.set_xlabel('Wavelength (nm)', fontsize=30)
 
-                        # print matrices for debugging, attempt smaller systems
-                        molecules = rows*cols*layers
-                        if molecules < 20:
-                            for index, row in enumerate(matrix.T):
-                                print_it = f'{index:03}:'
-                                for col in row:
-                                    val = f'{col:.3f}'
-                                    print_it += f' {val:>8}'
-                                print(print_it)
-
-                        # diagonalize TB ham for eigenvalues and eigenvectors
-                        eigenvalues, eigenvectors = np.linalg.eigh(matrix)
-                        # print eigenvalues and eigenvectors for debugging
-                        if molecules < 20:
-                            for i, ev in enumerate(eigenvectors.T):
-                                print_it = f'{i:02} ({eigenvalues[i]:.3f}):'
-                                for j in list(reversed(np.argsort(np.abs(ev)))):#find indices for largest component
-                                    val = ev[j]
-                                    print_it += f' ({j:02},{val:.3f})' if val < 0 else f' ({j:02}, {val:.3f})'
-
-                                for val in ev:
-                                    print_it += f' {val:.3f}' if val < 0 else f' {val:.4f}'
-                                print(print_it)
-                        # calculate oscillator strength        
-                        f1 = (2.0 / 3.0) * np.einsum('k,ik,jk,ix,jx->k', eigenvalues / 27.21, eigenvectors.T, eigenvectors.T, trans_dip, trans_dip)  
-                        
-                        # loop over spectral weight, compute spectral weight with f1, PR add-on IPR f2
-                        for i, f in enumerate([f1]):
-                            wavelength_range, spectral_weight, centers = get_spectrum(
-                                    eigenvalues,
-                                    f,
-                                    wavelength_min=7e-7,
-                                    wavelength_max=11e-7,
-                                    gamma=args.gamma,
-                                    E0=args.eshift
-                            )
-                            # use area to normalize
-                            area = simpson(spectral_weight, x=wavelength_range)
-                            spectral_weight /= area
-                            # 
-                            if spectral_max == -1:
-                                spectral_max = max(spectral_weight)
-                            factor = spectral_max / max(spectral_weight)
-
-                            if config_count == 1:
-                                line, = axes.plot(wavelength_range, factor * spectral_weight, label=label)
-                                if len(centers) < 20:
-                                    for center in centers:
-                                        wavelength = wavelength_range[center]
-                                        xvals = [wavelength, wavelength]
-                                        yvals = [0, factor * spectral_weight[center]]
-                                        axes.plot(xvals, yvals, linestyle='--', linewidth=4, label=f'{wavelength:.1f}nm')
-                                    axes.legend(fontsize=24, frameon=False)
-                            else:
-                                line, = axes.plot(wavelength_range, factor * spectral_weight, linestyle=dlinestyle, color=dcolor, linewidth=4, label=f'{dlabel}') #, label=label+f' ({area/1e9:.2f})'
-                                axes.legend(fontsize=24, loc='best', bbox_to_anchor=(0.75, 0.85), borderaxespad=0.5, frameon=False)
-                            axes.set_ylabel(f'Absorbance', fontsize=30)
-                            axes.text(705, 1.1*spectral_max, r'PBE0, 1NN-10$\AA$, $\Delta$E$_{shift}$ = 0.43 eV', fontsize=30) # PR later for generalization
-                            axes.text(-0.1, 1, r'(d)', fontsize=30 , transform=axes.transAxes, clip_on=False)      # PR later for generalization
-                            axes.tick_params(axis="x", labelsize=30)
-                            axes.tick_params(axis="y", labelsize=30)
-                            axes.set_ylim(0,1.2*spectral_max)
-                            axes.set_xlabel('Wavelength (nm)', fontsize=30)
-
-    print("Difference matrix")
-    for mat_index in range(1, len(system_matrix)):
-        mat_diff = system_matrix[mat_index] - system_matrix[mat_index-1]
-        for index, row in enumerate(mat_diff.T):
-            print_it = f'{index:03}:'
-            for col in row:
-                val = f'{col:.3f}'
-                print_it += f' {val:>8}'
-            print(print_it)
     
     print("Symmetric matrix")
     for mat_index in range(0, len(system_matrix)):
         mat_symm = system_matrix[mat_index]
+        print('max:', np.max(np.abs(mat_symm-mat_symm.T)))
+        
         for i in range(len(mat_symm[0])):
             for j in range(i+1, len(mat_symm[0])): 
                 mat_symm[i][j], mat_symm[j][i] = mat_symm[i][j] - mat_symm[j][i], mat_symm[j][i] - mat_symm[i][j]
+                
         for index, row in enumerate(mat_symm.T):
             print_it = f'{index:03}:'
             for col in row:
                 val = f'{col:.3f}'
                 print_it += f' {val:>8}'
-            print(print_it)
+            #print(print_it)
+    
+        
 
     if len(args.digitized) > 0:
-        axes.legend(fontsize=24, loc='best', borderaxespad=0.5, frameon=False) #
-        axes.legend(fontsize=24, loc='best', frameon=False)
+        axes.legend(fontsize=20, loc='best', frameon=False, bbox_to_anchor=(0.53, 0.6), borderaxespad=0.5) 
     if args.save:
-        fig.savefig(functional + '_' + label.replace(',','-').replace(' ','') + f'_{args.rcut}_{args.eshift}_spectrum_2D.pdf')
+        fig.savefig(functional + '_' + label.replace(',','-').replace(' ','') + f'_{args.rcut}_{args.eshift}_spectrum.pdf')
     else:
-        fig.savefig('PBE0-1d-coul-NN-10.pdf', bbox_inches='tight') # PR later
+        fig.savefig('1D-check-pbe0-10-coul.pdf', bbox_inches='tight') # PR later
         plt.show()
 
 
