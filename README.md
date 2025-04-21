@@ -40,6 +40,9 @@ python3 tb_ham.py H2OBPC PBE0 "60,10,1" --coupling "J_coul" --rcut "17" --eshift
 python3 tb_ham.py H2OBPC PBE0 "30,10,2" --coupling "J_coul" --rcut "10" --eshift 0.4 --gamma 0.45 --digitized ../systems/raw-sum-tabs.txt
 
 
+This material is based on work supported by National Science Foundation under NSF OAC-2311442. YS and PH were supported by NSF grant OAC-2311442 for part of this study, specifically the code development for modeling exciton absorption spectra.
+
+
 
 
 
