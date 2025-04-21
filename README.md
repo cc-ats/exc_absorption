@@ -15,8 +15,6 @@ Run `extract.py` to parse Q-Chem `.out` files and generate corresponding `.json`
 
 #### **Command Format**
 
-python3 extract.py <molecule> <functional>
-
 python3 extract.py H2OBPC PBE0
 
 ### **Stage 2: Generate Tight Binding Hamiltonian**
