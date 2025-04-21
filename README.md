@@ -1,6 +1,6 @@
 # Exciton Absorption 
 
-This repository provides a codebase for parsing Q-Chem output and constructing tight-binding Hamiltonians for excitonic systems. The codebase is organized into two main stages and supports flexible system dimensionality (1D, 2D, 3D) for model building and comparison with experiment.
+This repository provides a codebase for parsing Q-Chem output and constructing tight-binding Hamiltonians for excitonic systems to compute absorption spectra. The codebase is organized into two main stages and supports flexible system dimensionality (1D, 2D, 3D) for model building and comparison with experiment.
 
 # Dependencies
 
@@ -44,6 +44,14 @@ python3 tb_ham.py H2OBPC PBE0 "30,10,2" --coupling "J_coul" --rcut "10" --eshift
 
 ## Acknowledgments
 This material is based on work supported by National Science Foundation under NSF OAC-2311442. YS and PH were supported by NSF grant OAC-2311442 for part of this study, specifically the code development for modeling exciton absorption spectra.
+
+## Contributing
+
+* New features, bug fixes, documentation, tutorial examples, code testing is welcome in the developer community!
+
+  - If you find any bugs please form a [bug report/issue](https://github.com/cc-ats/exc_absorption/issues). 
+  - If you have a fix please consider adding a [pull request](https://github.com/cc-ats/exc_absorption/pulls)
+
 
 
 
