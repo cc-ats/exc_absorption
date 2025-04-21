@@ -127,14 +127,18 @@ def parse_qchem_output(filename):
         if state_num in [1, 2]:
             try:
                 trans_mom_str = trans_mom_matches[i]
-                trans_mom = [float(trans_mom_str[0]), float(trans_mom_str[1]), float(trans_mom_str[2])]
+                trans_mom = np.array([float(trans_mom_str[0]), float(trans_mom_str[1]), float(trans_mom_str[2])])
                 strength = float(strength_matches[i])
-
+                
+                sign = np.sign(trans_mom[np.argmax(np.absolute(trans_mom))])
+                print (sign)
                 excited_states.append({
                     'Excited State': state_num,
                     'Excitation Energy (eV)': float(excitation_energy),
-                    'Transition Dipole Moment': trans_mom,
-                    'Oscillator Strength': strength
+                    'Transition Dipole Moment unmodified': trans_mom.tolist(),
+                    'Transition Dipole Moment': (trans_mom * sign).tolist(),
+                    'Oscillator Strength': strength,
+                    'sign': np.sign(trans_mom[np.argmax(np.absolute(trans_mom))])
                 })
             except Exception as e:
                 print(f"Error parsing state {i+1}: {e}")
@@ -144,13 +148,17 @@ def parse_qchem_output(filename):
         state1, state2, coulomb, exchange, interaction = match
         state_pair = (int(state1), int(state2))
         if state_pair in [(1,1), (1,2), (2,1), (2,2)]:
+            sign = excited_states[state_pair[0]-1]['sign'] * excited_states[state_pair[1]+1]['sign']
             interactions.append({
                 'State Pair': state_pair,
-                'Coulomb Interaction (eV)': float(coulomb),
-                'Exchange Interaction (eV)': float(exchange),
-                'Dipole-Dipole Interaction (eV)': float(interaction)
+                'Coulomb Interaction (eV)': float(coulomb) * sign,
+                'Exchange Interaction (eV)': float(exchange) * sign,
+                'Dipole-Dipole Interaction (eV)': float(interaction) * sign
             })
-
+        if int(state1)==2 and int(state2)==2:
+            
+            diff = interactions[-2]['Coulomb Interaction (eV)'] - interactions[-3]['Coulomb Interaction (eV)']
+            print('diff', diff,  interactions[-2]['Coulomb Interaction (eV)'] )
     # Extract geometries (atomic positions from 'Standard Nuclear Orientation' sections)
     geometries = extract_geometries_with_rem_block(data)
 
