@@ -402,6 +402,12 @@ def extract_interaction_terms(json_files: list, combine='14.014,14.013', caldip=
                 Tx2 = excited_states[2].get("Transition Dipole Moment", None),
                 Ty2 = excited_states[3].get("Transition Dipole Moment", None),
                 
+                #component checks
+                xTx1 = excited_states[0].get("Transition Dipole Moment x", None),
+                xTy1 = excited_states[1].get("Transition Dipole Moment x", None),
+                xTx2 = excited_states[2].get("Transition Dipole Moment x", None),
+                xTy2 = excited_states[3].get("Transition Dipole Moment x", None),
+                
                 Tx1u = excited_states[0].get("Transition Dipole Moment unmodified", None),
                 Ty1u = excited_states[1].get("Transition Dipole Moment unmodified", None),
                 Tx2u = excited_states[2].get("Transition Dipole Moment unmodified", None),
@@ -431,7 +437,7 @@ def extract_interaction_terms(json_files: list, combine='14.014,14.013', caldip=
 
                         return interaction_energy * 27.21  # Convert Hartree to eV
 
-                    trans_dip = [Tx1[0], Ty1[0]]
+                    trans_dip = [Tx1[0], Ty1[0]]# append prefix if checking for components x,y,z
                     print(trans_dip)
                     dipole_matrix = np.zeros((2, 2))
 
@@ -494,7 +500,8 @@ def extract_interaction_terms(json_files: list, combine='14.014,14.013', caldip=
                     "Qy1": excited_states[1].get("Excitation Energy (eV)", None),
                     "Qx2": excited_states[2].get("Excitation Energy (eV)", None),
                     "Qy2": excited_states[3].get("Excitation Energy (eV)", None),
-                    "Tx1": excited_states[0].get("Transition Dipole Moment", None),
+                    # append x, y, z if using components
+                    "Tx1": excited_states[0].get("Transition Dipole Moment", None), 
                     "Ty1": excited_states[1].get("Transition Dipole Moment", None),
                     "Tx2": excited_states[2].get("Transition Dipole Moment", None),
                     "Ty2": excited_states[3].get("Transition Dipole Moment", None),
@@ -876,9 +883,9 @@ def build_matrix(coordinates, identifiers, interaction_terms, r_cutoffs=[8, 10],
                        
         if interaction_term is None:
             interaction_term = [val for key, val in interaction_terms.items()][0]
-        trans_dip[2*mi1+0] = interaction_term[0][1]['Tx1']
+        trans_dip[2*mi1+0] = interaction_term[0][1]['Tx1'] # append x, y, z based on components
         print(trans_dip[2*mi1+0])
-        trans_dip[2*mi1+1] = interaction_term[0][1]['Ty1']
+        trans_dip[2*mi1+1] = interaction_term[0][1]['Ty1'] # append x, y, z based on components
         print(trans_dip[2*mi1+1])
         matrix[2*mi1+0][2*mi1+0] = interaction_term[0][1]['Qx'+mi1_identifiers]
         matrix[2*mi1+1][2*mi1+1] = interaction_term[0][1]['Qy'+mi1_identifiers]
@@ -894,7 +901,7 @@ def voigt_spectral_weight(wavelength_range, eigenvalues, f, gamma=1.0,
                                        [889.567148e-9, 38.0147813e-9], 
                                        [914.206437e-9, 42.7828469e-9], 
                                        [945.514185e-9, 49.7859967e-9] ], 
-                          sigma=5e-9, c=2.998e8, h=4.135667696e-15, E0=0.0):
+                          sigma=25e-9, c=2.998e8, h=4.135667696e-15, E0=0.0):
 
     """
     Computes the spectral weight using the Voigt profile, which combines Gaussian and Lorentzian broadening.
@@ -1048,7 +1055,7 @@ def compute_area(E0, eigenvalues, f1, args, wavelengths_exp, intensities_exp, sp
 
 
 def plot_system(ax, mol_coordinates, mol_identifiers, atom_coordinates, 
-                atom_identifiers, interaction_terms, show_atoms=False, r_cutoffs=[8, 10], 
+                atom_identifiers, interaction_terms, show_atoms=True, r_cutoffs=[8, 10], 
                 z_cutoff=np.inf, config=None):
     """
     Visualizes a molecular system in 3D space using Matplotlib.
@@ -1268,7 +1275,7 @@ if __name__ == "__main__":
                 # extract r cutoffs
                 r_cutoffs = [float(r) for r in rcut.split(',')]
                 label = f'{r_cutoffs}'
-
+                
                 for coupling in couplings:
                     zigzag = 0
                     if args.zigzag != 'null':
@@ -1302,7 +1309,7 @@ if __name__ == "__main__":
                         print(distance)
                         distance_dict = {
                             '7.435': ['Dimer-A', 'magenta', 'dashed'],
-                            '9.741': ['Dimer-B', 'cyan', 'dotted'],
+                            '9.741': ['Dimer-B', 'blue', 'solid'],
                             '9.903': ['Dimer-C', 'green', '-.'],
                         }
                         # This is the second zigzag label
@@ -1343,6 +1350,7 @@ if __name__ == "__main__":
 
                     # print matrices for debugging, attempt smaller systems
                     molecules = rows*cols*layers
+                    label=f'{molecules}'
                     if molecules < 20:
                         for index, row in enumerate(matrix.T):
                             print_it = f'{index:03}:'
@@ -1353,6 +1361,7 @@ if __name__ == "__main__":
 
                     # diagonalize TB ham for eigenvalues and eigenvectors
                     eigenvalues, eigenvectors = np.linalg.eigh(matrix)
+                    print (eigenvalues, np.linalg.norm(eigenvectors, axis=0), eigenvectors.T)
                     # print eigenvalues and eigenvectors for debugging
                     """if molecules < 20:
                         for i, ev in enumerate(eigenvectors.T):
@@ -1365,8 +1374,8 @@ if __name__ == "__main__":
                                 print_it += f' {val:.3f}' if val < 0 else f' {val:.4f}'
                             print(print_it)"""
                     # calculate oscillator strength        
-                    f1 = (2.0 / 3.0) * np.einsum('k,ik,jk,ix,jx->k', eigenvalues / 27.21, eigenvectors.T, eigenvectors.T, trans_dip, trans_dip)  
-                    
+                    f1 = (2.0 / 3.0) * np.einsum('k,ik,jk,ix,jx->k', eigenvalues / 27.21, eigenvectors, eigenvectors, trans_dip, trans_dip)  
+                    print (f'{f1}')
                     
                     # Optimize E0 if there is experimental data to compare against
                     if len(args.digitized) > 0:
@@ -1403,9 +1412,18 @@ if __name__ == "__main__":
                         if spectral_max == -1:
                             spectral_max = max(spectral_weight)
                         factor = spectral_max / max(spectral_weight)
+                        c=2.998e8
+                        h=4.135667696e-15
+                        x_vals = (h * c / eigenvalues) * 1e9
+                        y_vals = np.zeros_like(x_vals)
 
                         if config_count == 1:
-                            line, = axes.plot(wavelength_range, factor * spectral_weight, label=dlabel, linestyle=dlinestyle, color=dcolor, linewidth=4)#, label=f'Theory (Optimized $E_0$={optimized_E0:.3f})')
+                            line, = axes.plot(wavelength_range, factor * spectral_weight, label=f'{molecules//2} X 2', linestyle=dlinestyle, color=dcolor, linewidth=4)#, label=f'Theory (Optimized $E_0$={optimized_E0:.3f})')
+                            #line, = axes.plot(x_vals, y_vals)
+                            # Add arrows at each x
+                            #for x in x_vals:
+                                #axes.annotate('', xy=(x, 0.1), xytext=(x, 0), arrowprops=dict(arrowstyle='->', color='blue', lw=1.5))
+
                             if len(centers) < 20:
                                 for center in centers:
                                     wavelength = wavelength_range[center]
@@ -1414,10 +1432,10 @@ if __name__ == "__main__":
                                     axes.plot(xvals, yvals, linestyle='--', linewidth=4, label=f'{wavelength:.1f}nm')
                                 axes.legend(fontsize=24, frameon=False, loc='best')
                         else:
-                            line, = axes.plot(wavelength_range, factor * spectral_weight, label=dlabel+f', $\Delta E_{{shift}}$={optimized_E0:.2f}eV', linestyle=dlinestyle, color=dcolor,linewidth=4) #label=rf"{r_cutoffs}, $\Delta E_{{shift}}$={optimized_E0:.2f}eV") #, label=label+f' ({area/1e9:.2f})'
+                            line, = axes.plot(wavelength_range, factor * spectral_weight, label=f'{molecules} + $\Delta E_{{shift}}$={optimized_E0:.2f}eV', linestyle=dlinestyle,linewidth=4) #label=rf"{r_cutoffs}, $\Delta E_{{shift}}$={optimized_E0:.2f}eV") #, label=label+f' ({area/1e9:.2f})'+f', $\Delta E_{{shift}}$={optimized_E0:.2f}eV'
                             axes.legend(fontsize=24, loc='upper left', frameon=False)
                         axes.set_ylabel(f'Absorbance', fontsize=30)
-                        axes.text(700, 1.1*spectral_max, r'PBE0', fontsize=30) # PR later for generalization
+                        axes.text(710, 1.2*spectral_max, r'PBE0, 3NN-26$\AA$, 1D', fontsize=30) # PR later for generalization
                         #axes.text(-0.1, 1, r'(j)', fontsize=30 , transform=axes.transAxes, clip_on=False)      # PR later for generalization
                         axes.tick_params(axis="x", labelsize=30)
                         axes.tick_params(axis="y", labelsize=30)
@@ -1448,7 +1466,7 @@ if __name__ == "__main__":
     if args.save:
         fig.savefig(functional + '_' + label.replace(',','-').replace(' ','') + f'_{args.rcut}_{args.eshift}_spectrum.pdf')
     else:
-        fig.savefig('1D-check-pbe0-10-coul.pdf', bbox_inches='tight') # PR later
+        fig.savefig('PBE0-1d-convergence-NN26-molecules.pdf', bbox_inches='tight') # PR later
         plt.show()
 
 
